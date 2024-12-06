@@ -166,6 +166,7 @@ public abstract class AbstractConnectionFactory implements ConnectionFactory, Di
 
 	@Nullable
 	private BackOff connectionCreatingBackOff;
+
 	/**
 	 * Create a new AbstractConnectionFactory for the given target ConnectionFactory, with no publisher connection
 	 * factory.
@@ -343,7 +344,16 @@ public abstract class AbstractConnectionFactory implements ConnectionFactory, Di
 
 	/**
 	 * Set addresses for clustering. This property overrides the host+port properties if not empty.
-	 * @param addresses list of addresses with form "host[:port],..."
+	 * @param addresses list of addresses in form {@code host[:port]}.
+	 * @since 3.2.1
+	 */
+	public void setAddresses(List<String> addresses) {
+		Assert.notEmpty(addresses, "Addresses must not be empty");
+		setAddresses(String.join(",", addresses));
+	}
+	/**
+	 * Set addresses for clustering. This property overrides the host+port properties if not empty.
+	 * @param addresses list of addresses with form {@code host1[:port1],host2[:port2],...}.
 	 */
 	public void setAddresses(String addresses) {
 		this.lock.lock();
@@ -478,8 +488,9 @@ public abstract class AbstractConnectionFactory implements ConnectionFactory, Di
 	}
 
 	/**
-	 * How long to wait (milliseconds) for a response to a connection close operation from the broker; default 30000 (30
-	 * seconds).
+	 * How long to wait (milliseconds) for a response to a connection close operation from the broker;
+	 * default 30000 (30 seconds).
+	 * Also used for {@link com.rabbitmq.client.Channel#waitForConfirms()}.
 	 * @param closeTimeout the closeTimeout to set.
 	 */
 	public void setCloseTimeout(int closeTimeout) {
@@ -580,8 +591,8 @@ public abstract class AbstractConnectionFactory implements ConnectionFactory, Di
 	protected final Connection createBareConnection() {
 		try {
 			String connectionName = this.connectionNameStrategy.obtainNewConnectionName(this);
-
 			com.rabbitmq.client.Connection rabbitConnection = connect(connectionName);
+			rabbitConnection.addShutdownListener(this);
 			Connection connection = new SimpleConnection(rabbitConnection, this.closeTimeout,
 					this.connectionCreatingBackOff == null ? null : this.connectionCreatingBackOff.start());
 			if (rabbitConnection instanceof AutorecoveringConnection auto) {
@@ -732,16 +743,8 @@ public abstract class AbstractConnectionFactory implements ConnectionFactory, Di
 		}
 	}
 
-	private static final class ConnectionBlockedListener implements BlockedListener {
-
-		private final Connection connection;
-
-		private final ApplicationEventPublisher applicationEventPublisher;
-
-		ConnectionBlockedListener(Connection connection, ApplicationEventPublisher applicationEventPublisher) {
-			this.connection = connection;
-			this.applicationEventPublisher = applicationEventPublisher;
-		}
+	private record ConnectionBlockedListener(Connection connection, ApplicationEventPublisher applicationEventPublisher)
+			implements BlockedListener {
 
 		@Override
 		public void handleBlocked(String reason) {
